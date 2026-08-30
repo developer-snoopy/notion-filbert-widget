@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Barista Brew Stopwatch</title>
+<style>
+  :root {
+    --bg: #F6EFE7;
+    --card: #FFFFFF;
+    --line: #E8DBCC;
+    --brown: #9A7654;
+    --brown-deep: #6B4F38;
+    --brown-soft: #F1E5D8;
+    --text: #3E2C22;
+    --muted: #8C8078;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+    padding: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 460px;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  .sub { font-size: 12px; color: var(--muted); }
+  .clock {
+    margin: 12px 0 4px;
+    text-align: center;
+    font-size: 46px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    color: var(--brown-deep);
+  }
+  .clock small { font-size: 22px; color: var(--brown); font-weight: 600; }
+  .state { text-align: center; font-size: 12px; color: var(--muted); min-height: 16px; }
+  .row { display: flex; gap: 8px; margin-top: 16px; }
+  button {
+    flex: 1;
+    min-height: 44px;
+    padding: 10px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--brown-soft);
+    color: var(--brown-deep);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background .15s ease, opacity .15s ease;
+  }
+  button:hover { background: #E9DAC8; }
+  button:focus-visible { outline: 2px solid var(--brown); outline-offset: 2px; }
+  button.primary { background: var(--brown); border-color: var(--brown); color: #FFFFFF; }
+  button.primary:hover { background: var(--brown-deep); }
+  button.ghost { background: #FFFFFF; color: var(--muted); }
+  button.ghost:hover { background: #FAF6F1; }
+  .phases { display: flex; gap: 8px; margin-top: 8px; }
+  .phases button { font-size: 13px; }
+  .divider { height: 1px; background: var(--line); margin: 18px 0 14px; }
+  .log-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  ul.log { list-style: none; margin: 0; padding: 0; }
+  ul.log li {
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #FBF7F2;
+    border: 1px solid #F0E7DC;
+    margin-bottom: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  ul.log li b { color: #2C2C2B; font-weight: 700; }
+  ul.log li span { color: var(--muted); }
+  .empty { font-size: 13px; color: var(--muted); padding: 6px 2px; }
+  @media (max-width: 420px) {
+    .clock { font-size: 40px; }
+    .phases { flex-wrap: wrap; }
+    .phases button { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div class="title">Brew Stopwatch</div>
+      <div class="sub">핸드드립 추출 타이머</div>
+    </div>
+
+    <div class="clock" id="clock" aria-live="off">00:00<small>.0</small></div>
+    <div class="state" id="state">시작 버튼을 눌러 추출을 시작하세요</div>
+
+    <div class="row">
+      <button class="primary" id="toggle" type="button">시작</button>
+      <button class="ghost" id="reset" type="button">초기화</button>
+    </div>
+
+    <div class="phases">
+      <button type="button" data-phase="뜸 들이기">뜸 들이기</button>
+      <button type="button" data-phase="1차 추출">1차 추출</button>
+      <button type="button" data-phase="2차 추출">2차 추출</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="log-title">추출 기록</div>
+    <ul class="log" id="log"></ul>
+    <div class="empty" id="empty">아직 기록이 없습니다. 단계 버튼을 누르면 구간 시간이 저장됩니다.</div>
+  </div>
+
+<script>
+  var clockEl = document.getElementById('clock');
+  var stateEl = document.getElementById('state');
+  var toggleEl = document.getElementById('toggle');
+  var resetEl = document.getElementById('reset');
+  var logEl = document.getElementById('log');
+  var emptyEl = document.getElementById('empty');
+
+  var running = false;
+  var elapsed = 0;      // 누적 경과(ms)
+  var startedAt = 0;    // 마지막 재생 시작 시각
+  var lastMark = 0;     // 직전 단계 버튼을 누른 시점(ms)
+  var records = [];
+  var raf = null;
+
+  function now() { return Date.now(); }
+  function currentMs() { return running ? elapsed + (now() - startedAt) : elapsed; }
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function formatClock(ms) {
+    var total = Math.floor(ms / 100) / 10;
+    var m = Math.floor(total / 60);
+    var s = Math.floor(total % 60);
+    var d = Math.floor((total * 10) % 10);
+    return pad(m) + ':' + pad(s) + '<small>.' + d + '</small>';
+  }
+
+  function formatKorean(ms) {
+    var sec = Math.round(ms / 1000);
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    if (m > 0 && s > 0) return m + '분 ' + s + '초';
+    if (m > 0) return m + '분';
+    return s + '초';
+  }
+
+  function render() {
+    clockEl.innerHTML = formatClock(currentMs());
+    if (running) raf = requestAnimationFrame(render);
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    startedAt = now();
+    toggleEl.textContent = '일시정지';
+    stateEl.textContent = '추출 진행 중';
+    render();
+  }
+
+  function pause() {
+    if (!running) return;
+    elapsed += now() - startedAt;
+    running = false;
+    if (raf) cancelAnimationFrame(raf);
+    toggleEl.textContent = '이어서 시작';
+    stateEl.textContent = '일시정지됨';
+    render();
+  }
+
+  function reset() {
+    running = false;
+    if (raf) cancelAnimationFrame(raf);
+    elapsed = 0;
+    lastMark = 0;
+    records = [];
+    toggleEl.textContent = '시작';
+    stateEl.textContent = '시작 버튼을 눌러 추출을 시작하세요';
+    render();
+    drawLog();
+  }
+
+  function mark(phase) {
+    if (!running && elapsed === 0) start();   // 첫 단계 버튼으로도 자동 시작
+    var t = currentMs();
+    var segment = t - lastMark;
+    lastMark = t;
+    records.push({ phase: phase, segment: segment, total: t });
+    stateEl.textContent = phase + ' 기록됨';
+    drawLog();
+  }
+
+  function drawLog() {
+    logEl.innerHTML = '';
+    if (records.length === 0) {
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    for (var i = 0; i < records.length; i++) {
+      var r = records[i];
+      var li = document.createElement('li');
+      var detail = formatKorean(r.segment) + ' 대기';
+      if (i > 0) detail += ' (' + formatKorean(r.total) + ' 경과)';
+      li.innerHTML = '<b>' + r.phase + '</b> <span>: ' + detail + '</span>';
+      logEl.appendChild(li);
+    }
+  }
+
+  toggleEl.addEventListener('click', function () { running ? pause() : start(); });
+  resetEl.addEventListener('click', reset);
+
+  var phaseButtons = document.querySelectorAll('[data-phase]');
+  for (var i = 0; i < phaseButtons.length; i++) {
+    phaseButtons[i].addEventListener('click', function () {
+      mark(this.getAttribute('data-phase'));
+    });
+  }
+
+  drawLog();
+  render();
+</script>
+</body>
+</html>
